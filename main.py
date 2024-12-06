@@ -85,3 +85,5 @@ df = pd.DataFrame(matches, columns=['old_url', 'new_url', 'similarity_score'])
 df.to_csv('redirect_map.csv', index=False)
 print("Redirect mapa uložena do redirect_map.csv")
 print("Hotovo.")
+
+#HOTOVO
