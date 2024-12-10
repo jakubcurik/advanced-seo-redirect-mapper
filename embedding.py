@@ -1,27 +1,28 @@
-from sentence_transformers import SentenceTransformer
-import json
-import os
+from transformers import AutoModel, AutoTokenizer
+import torch
 
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+model_name = "Seznam/retromae-small-cs"
+_model = None
+_tokenizer = None
 
-def load_weights():
-    if os.path.exists('weights.json'):
-        with open('weights.json', 'r', encoding='utf-8') as f:
-            w = json.load(f)
-        return w
-    return {
-        "title": 2.5,
-        "meta_desc": 0.5,
-        "url_slug": 3.0,
-        "headings": 2.5,
-        "body_text": 2.0,
-        "internal_links": 1.5
-    }
+def get_model_and_tokenizer():
+    global _model, _tokenizer
+    if _model is None or _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained(model_name)
+        _model = AutoModel.from_pretrained(model_name)
+        _model.eval()
+    return _model, _tokenizer
 
-def weighted_embedding(content_dict: dict, weights: dict = None):
-    if weights is None:
-        weights = load_weights()
+def get_embedding_from_text(text: str):
+    model, tokenizer = get_model_and_tokenizer()
+    inputs = tokenizer([text], max_length=512, padding=True, truncation=True, return_tensors='pt')
+    with torch.no_grad():
+        outputs = model(**inputs)
+    cls_emb = outputs.last_hidden_state[:, 0, :]
+    return cls_emb[0]
 
+def weighted_embedding(content_dict: dict, weights: dict):
+    model, tokenizer = get_model_and_tokenizer()
     title_text = content_dict.get("title", "")
     meta_text = content_dict.get("meta_desc", "")
     slug_text = content_dict.get("url_slug", "")
@@ -29,21 +30,27 @@ def weighted_embedding(content_dict: dict, weights: dict = None):
     body_text = content_dict.get("body_text", "")
     links_text = content_dict.get("internal_links", "")
 
-    title_emb = model.encode([title_text], show_progress_bar=False)[0]
-    meta_emb = model.encode([meta_text], show_progress_bar=False)[0]
-    slug_emb = model.encode([slug_text], show_progress_bar=False)[0]
-    head_emb = model.encode([head_text], show_progress_bar=False)[0]
-    body_emb = model.encode([body_text], show_progress_bar=False)[0]
-    links_emb = model.encode([links_text], show_progress_bar=False)[0]
+    # ... zbytek kódu stejný, využívá get_embedding_from_text()
+    title_emb = get_embedding_from_text(title_text)
+    meta_emb = get_embedding_from_text(meta_text)
+    slug_emb = get_embedding_from_text(slug_text)
+    head_emb = get_embedding_from_text(head_text)
+    body_emb = get_embedding_from_text(body_text)
+    links_emb = get_embedding_from_text(links_text)
 
-    total_weight = (weights["title"] + weights["meta_desc"] + weights["url_slug"] +
-                    weights["headings"] + weights["body_text"] + weights["internal_links"])
+    total_weight = (
+        weights["title"] + weights["meta_desc"] + weights["url_slug"] +
+        weights["headings"] + weights["body_text"] + weights["internal_links"]
+    )
 
-    weighted_sum = (title_emb * weights["title"] +
-                    meta_emb * weights["meta_desc"] +
-                    slug_emb * weights["url_slug"] +
-                    head_emb * weights["headings"] +
-                    body_emb * weights["body_text"] +
-                    links_emb * weights["internal_links"])
+    weighted_sum = (
+        title_emb * weights["title"] +
+        meta_emb * weights["meta_desc"] +
+        slug_emb * weights["url_slug"] +
+        head_emb * weights["headings"] +
+        body_emb * weights["body_text"] +
+        links_emb * weights["internal_links"]
+    )
 
-    return weighted_sum / total_weight
+    weighted_emb = (weighted_sum / total_weight).detach().cpu().numpy().astype("float32")
+    return weighted_emb
