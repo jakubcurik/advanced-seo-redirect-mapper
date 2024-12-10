@@ -1,14 +1,32 @@
+import csv
 import pandas as pd
 
+def load_data(file) -> pd.DataFrame:
+    # Nejprve přečteme pár řádků z souboru, abychom mohli zdetekovat oddělovač.
+    raw = file.read()
+    file.seek(0)  # Vrátíme ukazatel na začátek souboru
+    sniffer = csv.Sniffer()
+    dialect = sniffer.sniff(raw.decode('utf-8', errors='replace').splitlines()[0])
+    delimiter = dialect.delimiter
+    file.seek(0)
 
-def load_urls(path: str) -> list:
-    # Použijeme on_bad_lines='skip' místo error_bad_lines a warn_bad_lines
-    df = pd.read_csv(path, sep=';', encoding='utf-8-sig', on_bad_lines='skip')
+    if file.name.endswith('.csv') or file.name.endswith('.tsv'):
+        return pd.read_csv(file, sep=delimiter, encoding='utf-8-sig', on_bad_lines='skip')
+    elif file.name.endswith('.xlsx'):
+        return pd.read_excel(file, engine='openpyxl')
+    else:
+        raise ValueError(f"Nepodporovaný formát souboru: {file.name}")
 
-    columns_lower = [c.lower() for c in df.columns]
-    url_col_candidates = [c for c in columns_lower if "url" in c]
+def find_url_column(df: pd.DataFrame) -> str:
+    columns_lower = [col.lower() for col in df.columns]
+    url_col_candidates = [col for col in columns_lower if "url" in col]
+
     if not url_col_candidates:
-        raise ValueError(f"V souboru {path} nebyl nalezen žádný sloupec obsahující 'url' v názvu.")
+        raise ValueError("Nebyl nalezen žádný sloupec obsahující 'url' v názvu.")
 
-    url_col = df.columns[columns_lower.index(url_col_candidates[0])]
-    return df[url_col].dropna().tolist()
+    return df.columns[columns_lower.index(url_col_candidates[0])]
+
+def extract_urls(file) -> (pd.DataFrame, str):
+    df = load_data(file)
+    url_col = find_url_column(df)
+    return df, url_col
