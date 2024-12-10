@@ -1,62 +1,73 @@
 import streamlit as st
 import pandas as pd
-import json
-import plotly.express as px
-import os
-from clustering import reduce_embeddings
+import asyncio
+import nest_asyncio
+from data_loader import extract_urls
+from main import filter_and_unify_urls, scrape_and_process_async
 
-st.title("SEO Redirect Mapper")
+nest_asyncio.apply()
 
-st.subheader("Nastavení vah")
-title_w = st.slider("Title weight", 0.0, 5.0, 2.5, 0.5)
-meta_w = st.slider("Meta Desc weight", 0.0, 5.0, 0.5, 0.5)
-slug_w = st.slider("URL Slug weight", 0.0, 5.0, 3.0, 0.5)
-head_w = st.slider("Headings weight", 0.0, 5.0, 2.5, 0.5)
-body_w = st.slider("Body weight", 0.0, 5.0, 2.0, 0.5)
-links_w = st.slider("Internal Links weight", 0.0, 5.0, 1.5, 0.5)
+st.title("Advanced SEO Redirect Mapper")
+st.header("Nahrajte soubory s původními a novými URL")
 
-if st.button("Přegenerovat embeddings a párování"):
-    weights = {
-        "title": title_w,
-        "meta_desc": meta_w,
-        "url_slug": slug_w,
-        "headings": head_w,
-        "body_text": body_w,
-        "internal_links": links_w
-    }
-    with open('weights.json', 'w', encoding='utf-8') as f:
-        json.dump(weights, f)
-    st.write("Váhy uloženy do weights.json. Nyní spusť ručně `main.py` pro přegenerování.")
+if 'cleaned' not in st.session_state:
+    st.session_state['cleaned'] = False
+    st.session_state['cleaned_old_urls'] = []
+    st.session_state['cleaned_new_urls'] = []
 
-st.subheader("Filtr podle similarity score")
-score_filter = st.slider("Min similarity", 0.0, 1.0, 0.8, 0.05)
+uploaded_old_file = st.file_uploader("Nahrajte soubor se starými URL (CSV, XLSX, TSV):", type=['csv', 'xlsx', 'tsv'])
+uploaded_new_file = st.file_uploader("Nahrajte soubor s novými URL (CSV, XLSX, TSV):", type=['csv', 'xlsx', 'tsv'])
 
-if st.button("Zobrazit výsledky"):
-    if not os.path.exists('redirect_map.csv'):
-        st.write("redirect_map.csv neexistuje. Spusť main.py nejdříve.")
-    else:
-        df = pd.read_csv('redirect_map.csv')
-        filtered_df = df[df["similarity_score"] >= score_filter]
-        st.write(filtered_df)
+if uploaded_old_file and uploaded_new_file:
+    try:
+        st.subheader("Přehled sloupců ze souboru se starými URL")
+        old_df, old_url_col = extract_urls(uploaded_old_file)
+        old_df = old_df.fillna("N/A").astype(str)
 
-if st.button("Zobrazit clustery"):
-    if not (os.path.exists('new_data_embeddings.csv') and os.path.exists('labels.csv')):
-        st.write("Soubory pro clustery neexistují. Spusť main.py nejdříve.")
-    else:
-        new_data_df = pd.read_csv('new_data_embeddings.csv')
-        labels_df = pd.read_csv('labels.csv')
-        urls = new_data_df['url'].tolist()
-        embeddings = new_data_df.drop('url', axis=1).values
-        labels = labels_df['label'].values
+        old_preview = pd.DataFrame(
+            [old_df.columns, old_df.iloc[0]],
+            index=["Sloupec", "Příklad"]
+        )
+        st.write(old_preview)
 
-        X_reduced = reduce_embeddings(embeddings)
+        selected_old_col = st.selectbox("Nalezený sloupec se starými URL:", old_df.columns, index=old_df.columns.get_loc(old_url_col))
+        old_urls = old_df[selected_old_col].dropna().tolist()
 
-        df_vis = pd.DataFrame({
-            'x': X_reduced[:,0],
-            'y': X_reduced[:,1],
-            'label': labels,
-            'url': urls
-        })
+        st.subheader("Přehled sloupců ze souboru s novými URL")
+        new_df, new_url_col = extract_urls(uploaded_new_file)
+        new_df = new_df.fillna("N/A").astype(str)
 
-        fig = px.scatter(df_vis, x='x', y='y', color='label', hover_data=['url'])
-        st.plotly_chart(fig)
+        new_preview = pd.DataFrame(
+            [new_df.columns, new_df.iloc[0]],
+            index=["Sloupec", "Příklad"]
+        )
+        st.write(new_preview)
+
+        selected_new_col = st.selectbox("Nalezený sloupec s novými URL:", new_df.columns, index=new_df.columns.get_loc(new_url_col))
+        new_urls = new_df[selected_new_col].dropna().tolist()
+
+        if st.button("Spustit čištění URL"):
+            cleaned_old_urls = filter_and_unify_urls(old_urls)
+            cleaned_new_urls = filter_and_unify_urls(new_urls)
+            st.success(f"Čištění dokončeno! Počet starých URL: {len(cleaned_old_urls)}, počet nových URL: {len(cleaned_new_urls)}")
+            st.session_state['cleaned'] = True
+            st.session_state['cleaned_old_urls'] = cleaned_old_urls
+            st.session_state['cleaned_new_urls'] = cleaned_new_urls
+
+        if st.session_state['cleaned']:
+            if st.button("Spustit scraping URL"):
+                with st.spinner("Probíhá scraping..."):
+                    # Zde voláme async funkci, která vrací coroutine, a spustíme ji pomocí asyncio.run
+                    scraped_old_data = asyncio.run(scrape_and_process_async(st.session_state['cleaned_old_urls'], exclude_selectors=[], weights=None))
+                    scraped_new_data = asyncio.run(scrape_and_process_async(st.session_state['cleaned_new_urls'], exclude_selectors=[], weights=None))
+
+                    st.subheader("Výsledky scrapingu pro staré URL")
+                    scraped_old_df = pd.DataFrame(scraped_old_data)
+                    st.write(scraped_old_df)
+
+                    st.subheader("Výsledky scrapingu pro nové URL")
+                    scraped_new_df = pd.DataFrame(scraped_new_data)
+                    st.write(scraped_new_df)
+
+    except Exception as e:
+        st.error(f"Chyba při načítání nebo zpracování souborů: {e}")
