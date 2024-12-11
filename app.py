@@ -51,9 +51,23 @@ if 'cleaned' not in st.session_state:
 uploaded_old_file = st.file_uploader("Nahrajte soubor se starými URL (CSV, XLSX, TSV):", type=['csv', 'xlsx', 'tsv'])
 uploaded_new_file = st.file_uploader("Nahrajte soubor s novými URL (CSV, XLSX, TSV):", type=['csv', 'xlsx', 'tsv'])
 
+# Výběr metody embeddingů
 transform_method = st.selectbox("Způsob zpracování embeddingů:", ["Lineární kombinace", "PCA", "UMAP"])
 
-exclude_selectors_input = st.text_input("CSS selektory k vyloučení (oddělit čárkou)", value="header,footer,.sidebar,.header,.footer,.navigation,.menu")
+# Výběr modelu pro embeddingy
+model_choices = {
+    "retromae-small-cs": "Seznam/retromae-small-cs",
+    "multilingual-MiniLM-L12-v2": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+}
+selected_model_key = st.selectbox("Vyberte embedding model", options=list(model_choices.keys()))
+selected_model = model_choices[selected_model_key]
+st.session_state['selected_model'] = selected_model
+
+exclude_selectors_input = st.text_area(
+    "CSS selektory k vyloučení (oddělte čárkou)",
+    value="header,footer,.sidebar,.header,.footer,.navigation,.menu,#footer,#header,.c-header__fix,.c-header,.footer-wrap",
+    height=126
+)
 exclude_selectors = [x.strip() for x in exclude_selectors_input.split(',') if x.strip()]
 
 if uploaded_old_file and uploaded_new_file:
@@ -102,14 +116,6 @@ if uploaded_old_file and uploaded_new_file:
                     elif transform_method == "UMAP":
                         chosen_transform = "UMAP"
 
-                    # Předáme max_connections a delay_between_requests do scrape_and_process_async přes session_state
-                    # Abychom to nemuseli měnit v main, předáme to do session a main.py upravíme:
-                    # Budeme muset main.py upravit aby tyto parametry také převzal.
-
-                    # Ale protože main.py nemá v kódu nic co by to brzdilo, upravíme main.py, aby:
-                    # async_process_urls přijímal max_connections a delay_between_requests a předal je do scrape_urls_async
-
-                    # To uděláme až na konci. Zatím předpokládejme, že main.py umí tyto parametry přijmout.
                     scraped_old_data = asyncio.run(scrape_and_process_async(
                         st.session_state['cleaned_old_urls'],
                         exclude_selectors,

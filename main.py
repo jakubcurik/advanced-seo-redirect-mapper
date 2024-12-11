@@ -9,9 +9,7 @@ from scraper import scrape_urls_async
 from embedding import weighted_embedding
 from clustering import cluster_urls, find_best_match
 from clustering import reduce_embeddings
-from cache_manager import get_from_cache, set_to_cache
 from sklearn.metrics.pairwise import cosine_similarity
-import hashlib
 
 exclude_selectors = ['header', 'footer', '.sidebar', '.header', '.footer', '.navigation', '.menu']
 
@@ -60,45 +58,20 @@ async def filter_and_unify_urls_async(urls: list) -> list:
     valid_urls = await validate_urls_async(unified_urls)
     return valid_urls
 
-def compute_content_hash(content: dict) -> str:
-    content_str = json.dumps(content, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(content_str.encode('utf-8')).hexdigest()
-
 async def async_process_urls(urls: list, exclude_selectors: list, weights: dict, transform_method: str, max_connections: int, delay_between_requests: float) -> list:
+    # Žádné cachování – pokaždé vše znovu
     fresh_data = await scrape_urls_async(urls, exclude_selectors, max_connections, delay_between_requests)
 
     result = []
     for u, c in zip(urls, fresh_data):
-        new_hash = compute_content_hash(c)
-        cached = get_from_cache(u)
-
-        if cached is not None:
-            old_hash = cached.get("hash")
-            if old_hash == new_hash and "embedding" in cached:
-                emb = np.array(cached["embedding"], dtype=np.float32)
-                result.append({"url": u, "content": c, "embedding": emb})
-                continue
-
         emb = weighted_embedding(c, weights).astype(np.float32)
-        new_data = {
-            "content": c,
-            "embedding": emb.tolist(),
-            "hash": new_hash
-        }
-        set_to_cache(u, new_data)
         result.append({"url": u, "content": c, "embedding": emb})
 
     if transform_method in ["PCA", "UMAP"]:
         all_emb = [x["embedding"] for x in result]
-        # all_emb je list numpy arrayů float32
         reduced = reduce_embeddings(all_emb, method=transform_method).astype(np.float32)
         for i in range(len(result)):
             result[i]["embedding"] = reduced[i]
-            u = result[i]["url"]
-            cached = get_from_cache(u)
-            if cached is not None:
-                cached["embedding"] = reduced[i].tolist()
-                set_to_cache(u, cached)
 
     return result
 

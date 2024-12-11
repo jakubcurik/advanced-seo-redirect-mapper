@@ -1,16 +1,26 @@
+import streamlit as st
 from transformers import AutoModel, AutoTokenizer
 import torch
 
-model_name = "Seznam/retromae-small-cs"
 _model = None
 _tokenizer = None
+_current_model_name = None
 
 def get_model_and_tokenizer():
-    global _model, _tokenizer
-    if _model is None or _tokenizer is None:
-        _tokenizer = AutoTokenizer.from_pretrained(model_name)
-        _model = AutoModel.from_pretrained(model_name)
+    global _model, _tokenizer, _current_model_name
+
+    # Získáme vybraný model z session_state, pokud není nastaven, použijeme defaultní
+    if 'selected_model' in st.session_state:
+        selected_model_name = st.session_state['selected_model']
+    else:
+        selected_model_name = "Seznam/retromae-small-cs"
+
+    if _model is None or _tokenizer is None or _current_model_name != selected_model_name:
+        _tokenizer = AutoTokenizer.from_pretrained(selected_model_name)
+        _model = AutoModel.from_pretrained(selected_model_name)
         _model.eval()
+        _current_model_name = selected_model_name
+
     return _model, _tokenizer
 
 def get_embedding_from_text(text: str):
@@ -30,7 +40,6 @@ def weighted_embedding(content_dict: dict, weights: dict):
     body_text = content_dict.get("body_text", "")
     links_text = content_dict.get("internal_links", "")
 
-    # ... zbytek kódu stejný, využívá get_embedding_from_text()
     title_emb = get_embedding_from_text(title_text)
     meta_emb = get_embedding_from_text(meta_text)
     slug_emb = get_embedding_from_text(slug_text)
